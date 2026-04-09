@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ScanVault — Barcode Scanner</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#ffffff;--bg2:#f5f5f4;--bg3:#ececea;
+  --bgI:#e6f1fb;--bgS:#eaf3de;--bgW:#faeeda;--bgD:#fcebeb;
+  --tx:#1a1a18;--tx2:#6b6b67;--tx3:#a0a09a;
+  --txI:#185fa5;--txS:#3b6d11;--txW:#854f0b;--txD:#a32d2d;
+  --bd:#e0dfd8;--bd2:#c8c7c0;
+  --rm:8px;--rl:12px;
+  --mono:'Space Mono',monospace;--sans:'DM Sans',sans-serif;
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#1c1c1a;--bg2:#2a2a27;--bg3:#333330;
+  --bgI:#0c447c;--bgS:#27500a;--bgW:#633806;--bgD:#791f1f;
+  --tx:#f0efe8;--tx2:#a0a09a;--tx3:#6b6b67;
+  --txI:#85b7eb;--txS:#c0dd97;--txW:#fac775;--txD:#f09595;
+  --bd:#38382f;--bd2:#4a4a40;
+}}
+html,body{height:100%}
+body{font-family:var(--sans);background:var(--bg2);color:var(--tx);min-height:100vh;padding:1.25rem .875rem}
+.app{max-width:500px;margin:0 auto}
+
+/* Header */
+.hdr{display:flex;align-items:center;gap:12px;margin-bottom:1.25rem}
+.logo{width:42px;height:42px;background:var(--bgI);border-radius:var(--rm);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.logo svg{width:22px;height:22px;stroke:var(--txI);fill:none;stroke-width:2}
+.hdr-title{font-size:20px;font-weight:700;font-family:var(--mono)}
+.hdr-sub{font-size:12px;color:var(--tx2);margin-top:2px}
+
+/* Tabs */
+.tabs{display:flex;gap:3px;background:var(--bg);border:0.5px solid var(--bd);border-radius:var(--rm);padding:3px;margin-bottom:1.1rem}
+.tab{flex:1;padding:8px 4px;font-size:13px;font-weight:500;border-radius:6px;cursor:pointer;border:none;background:transparent;color:var(--tx2);font-family:var(--sans);transition:all .15s}
+.tab.active{background:var(--bg2);color:var(--tx);border:0.5px solid var(--bd2)}
+.panel{display:none}.panel.active{display:block}
+
+/* ── CAMERA ── */
+/* Quagga NEEDS a real div as its viewport container */
+#scanner-container{
+  position:relative;
+  width:100%;
+  aspect-ratio:4/3;
+  background:#000;
+  border-radius:var(--rl);
+  overflow:hidden;
+  margin-bottom:.75rem;
+}
+/* Quagga injects a <video> and a <canvas> — make both fill the box */
+#scanner-container video,
+#scanner-container canvas{
+  position:absolute;
+  top:0;left:0;
+  width:100% !important;
+  height:100% !important;
+  object-fit:cover;
+}
+/* Our own overlay lives on top */
+.scan-overlay{
+  position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  pointer-events:none;
+  z-index:10;
+}
+.scan-frame{width:220px;height:130px;position:relative}
+.sf-tl,.sf-tr,.sf-bl,.sf-br{position:absolute;width:28px;height:28px}
+.sf-tl{top:0;left:0;border-top:3px solid #4da6ff;border-left:3px solid #4da6ff}
+.sf-tr{top:0;right:0;border-top:3px solid #4da6ff;border-right:3px solid #4da6ff}
+.sf-bl{bottom:0;left:0;border-bottom:3px solid #4da6ff;border-left:3px solid #4da6ff}
+.sf-br{bottom:0;right:0;border-bottom:3px solid #4da6ff;border-right:3px solid #4da6ff}
+.scan-line{position:absolute;left:6px;right:6px;height:2px;background:#4da6ff;animation:scanMove 2s ease-in-out infinite;opacity:.9}
+@keyframes scanMove{0%{top:6px;opacity:.4}50%{top:calc(100% - 6px);opacity:1}100%{top:6px;opacity:.4}}
+.scan-idle{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:10px;z-index:5;
+  background:rgba(0,0,0,.55);color:#fff
+}
+.scan-idle svg{width:48px;height:48px;stroke:#4da6ff;fill:none;stroke-width:1.5;opacity:.9}
+.scan-idle p{font-size:13px;opacity:.75;text-align:center;padding:0 1.5rem}
+
+/* status pill */
+.cam-pill{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:12px;font-family:var(--mono);
+  padding:5px 12px;border-radius:20px;
+  background:var(--bg3);border:0.5px solid var(--bd);
+  margin-bottom:.75rem;width:100%;justify-content:center;
+}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--tx3);flex-shrink:0}
+.dot.green{background:#22c55e;box-shadow:0 0 6px #22c55e88}
+.dot.red{background:#ef4444}
+.dot.pulse{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Buttons */
+.btn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:.875rem}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 14px;border-radius:var(--rm);font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;border:0.5px solid var(--bd2);background:var(--bg);color:var(--tx);transition:all .15s;width:100%}
+.btn:hover{background:var(--bg2)}
+.btn:active{transform:scale(.98)}
+.btn.primary{background:var(--bgI);color:var(--txI);border-color:transparent}
+.btn.primary:hover{opacity:.85}
+.btn.danger{background:var(--bgD);color:var(--txD);border-color:transparent}
+.btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0}
+
+/* cam select */
+.cam-select-wrap{margin-bottom:.75rem}
+.cam-select-wrap label{font-size:11px;font-weight:600;color:var(--tx2);text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:4px}
+select.cam-select{width:100%;padding:8px 10px;border-radius:var(--rm);border:0.5px solid var(--bd2);background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:13px;outline:none}
+select.cam-select:focus{border-color:var(--txI)}
+
+/* divider */
+.divider{height:0.5px;background:var(--bd);margin:.875rem 0}
+
+/* manual row */
+.manual-row{display:flex;gap:7px;margin-bottom:.875rem}
+.manual-row input{flex:1}
+.manual-row .btn{width:auto;padding:9px 14px}
+
+/* result card */
+.result-card{background:var(--bg2);border:0.5px solid var(--bd);border-radius:var(--rm);padding:10px 14px;margin-bottom:.75rem;display:flex;align-items:center;gap:10px}
+.bc-bars{font-family:var(--mono);font-size:11px;letter-spacing:-1.5px;color:var(--tx3);user-select:none;flex-shrink:0}
+.bc-val{font-family:var(--mono);font-size:14px;font-weight:700;flex:1;word-break:break-all}
+.badge{display:inline-block;font-size:11px;padding:3px 8px;border-radius:20px;font-weight:600;white-space:nowrap}
+.bi{background:var(--bgI);color:var(--txI)}
+.bs{background:var(--bgS);color:var(--txS)}
+.bw{background:var(--bgW);color:var(--txW)}
+
+/* form */
+.field-group{display:grid;gap:9px;margin-bottom:1.1rem}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:11px;font-weight:600;color:var(--tx2);text-transform:uppercase;letter-spacing:.06em}
+input[type=text],input[type=number],select.fsel,textarea{width:100%;padding:9px 11px;border-radius:var(--rm);border:0.5px solid var(--bd2);background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:14px;outline:none;transition:.15s}
+input:focus,select.fsel:focus,textarea:focus{border-color:var(--txI);box-shadow:0 0 0 3px color-mix(in srgb,var(--bgI) 60%,transparent)}
+textarea{resize:vertical;min-height:70px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.form-bc{background:var(--bg2);border:0.5px solid var(--bd);border-radius:var(--rm);padding:9px 13px;display:flex;align-items:center;gap:8px;margin-bottom:.875rem}
+.form-bc-val{font-family:var(--mono);font-size:13px;font-weight:700;flex:1;word-break:break-all;color:var(--tx)}
+.form-bc-btn{padding:4px 9px;border-radius:6px;border:0.5px solid var(--bd);background:transparent;color:var(--tx2);font-size:11px;cursor:pointer;font-family:var(--sans)}
+
+/* stats */
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:1.1rem}
+.stat{background:var(--bg);border-radius:var(--rm);padding:.8rem;text-align:center;border:0.5px solid var(--bd)}
+.stat-n{font-size:21px;font-weight:700;font-family:var(--mono)}
+.stat-l{font-size:10px;color:var(--tx2);margin-top:2px;text-transform:uppercase;letter-spacing:.05em}
+
+/* search */
+.srch{position:relative;margin-bottom:.875rem}
+.srch input{padding-left:34px}
+.srch-ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;stroke:var(--tx2);fill:none;stroke-width:2;pointer-events:none}
+
+/* product cards */
+.plist{display:grid;gap:7px}
+.pcard{background:var(--bg);border-radius:var(--rl);border:0.5px solid var(--bd);padding:.85rem .95rem;transition:.15s}
+.pcard:hover{border-color:var(--bd2)}
+.pc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:5px}
+.pc-name{font-size:15px;font-weight:600}
+.pc-bc{font-family:var(--mono);font-size:11px;color:var(--tx2);margin-top:2px}
+.pc-row{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.pc-price{font-size:14px;font-weight:700;font-family:var(--mono)}
+.pc-actions{display:flex;gap:5px;flex-shrink:0}
+.icobtn{padding:5px 9px;border-radius:6px;border:0.5px solid var(--bd);background:transparent;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--sans);transition:.15s}
+.icobtn.edit{color:var(--txI)}.icobtn.edit:hover{background:var(--bgI)}
+.icobtn.del{color:var(--txD)}.icobtn.del:hover{background:var(--bgD)}
+
+.empty{text-align:center;padding:2.5rem 1rem;color:var(--tx2);font-size:13px;line-height:1.8}
+
+/* toast */
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--tx);color:var(--bg);border-radius:var(--rl);padding:9px 18px;font-size:13px;font-weight:500;transition:transform .3s cubic-bezier(.34,1.56,.64,1);z-index:9999;white-space:nowrap;pointer-events:none;max-width:90vw;text-align:center}
+.toast.show{transform:translateX(-50%) translateY(0)}
+
+#scan-result{display:none;margin-top:.25rem}
+#found-product{margin-bottom:.6rem}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <div class="hdr">
+    <div class="logo">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="2" height="16"/><rect x="7" y="4" width="1" height="16"/><rect x="10" y="4" width="2" height="16"/><rect x="14" y="4" width="1" height="16"/><rect x="17" y="4" width="2" height="16"/><rect x="21" y="4" width="1" height="16"/></svg>
+    </div>
+    <div>
+      <div class="hdr-title">ScanVault</div>
+      <div class="hdr-sub">Barcode scanner &amp; product portal</div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('scan')">Scan</button>
+    <button class="tab" onclick="switchTab('add')">Add Product</button>
+    <button class="tab" onclick="switchTab('products')">Inventory</button>
+  </div>
+
+  <!-- ═══════════════════════════ SCAN TAB ════════════════════════════ -->
+  <div class="panel active" id="tab-scan">
+
+    <!-- Camera viewport — Quagga injects <video>+<canvas> here -->
+    <div id="scanner-container">
+      <!-- idle placeholder shown before camera starts -->
+      <div class="scan-idle" id="scan-idle">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <p>Press <strong>Start Camera</strong> to begin scanning barcodes</p>
+      </div>
+      <!-- scan-frame overlay -->
+      <div class="scan-overlay" id="scan-overlay" style="display:none">
+        <div class="scan-frame">
+          <div class="scan-line"></div>
+          <div class="sf-tl"></div><div class="sf-tr"></div>
+          <div class="sf-bl"></div><div class="sf-br"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status pill -->
+    <div class="cam-pill" id="cam-pill">
+      <span class="dot" id="cam-dot"></span>
+      <span id="cam-status-txt">Camera not started</span>
+    </div>
+
+    <!-- Camera selector (populated once permissions granted) -->
+    <div class="cam-select-wrap" id="cam-select-wrap" style="display:none">
+      <label>Camera</label>
+      <select class="cam-select" id="cam-select" onchange="switchCamera()"></select>
+    </div>
+
+    <!-- Buttons -->
+    <div class="btn-row">
+      <button class="btn primary" id="btn-start" onclick="startCamera()">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M20 7h-3.2L15 5H9L7.2 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
+        Start Camera
+      </button>
+      <button class="btn" id="btn-stop" onclick="stopCamera()" disabled>
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        Stop
+      </button>
+    </div>
+
+    <div class="divider"></div>
+    <p style="font-size:11px;color:var(--tx2);margin-bottom:.5rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Or enter barcode manually</p>
+    <div class="manual-row">
+      <input type="text" id="manual-input" placeholder="e.g. 5901234123457"
+        onkeydown="if(event.key==='Enter')manualScan()"/>
+      <button class="btn primary" onclick="manualScan()">
+        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>OK
+      </button>
+    </div>
+
+    <!-- Result -->
+    <div id="scan-result">
+      <div class="result-card">
+        <span class="bc-bars">||| | || |||</span>
+        <span class="bc-val" id="scanned-code"></span>
+        <span class="badge" id="scan-badge">Scanned</span>
+      </div>
+      <div id="found-product"></div>
+      <button class="btn primary" onclick="useBarcodeInForm()">Use in Add Product →</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ ADD TAB ═════════════════════════════ -->
+  <div class="panel" id="tab-add">
+    <div class="form-bc">
+      <span class="bc-bars">||| | || |||</span>
+      <span class="form-bc-val" id="form-bc-val">No barcode scanned</span>
+      <button class="form-bc-btn" onclick="switchTab('scan')">Scan →</button>
+    </div>
+    <div class="field-group">
+      <div class="field"><label>Barcode *</label>
+        <input type="text" id="f-barcode" placeholder="Scan or type barcode"/></div>
+      <div class="field"><label>Product Name *</label>
+        <input type="text" id="f-name" placeholder="e.g. Organic Oat Milk 1L"/></div>
+      <div class="row2">
+        <div class="field"><label>Price (₹)</label>
+          <input type="number" id="f-price" placeholder="0.00" min="0" step="0.01"/></div>
+        <div class="field"><label>Stock Qty</label>
+          <input type="number" id="f-stock" placeholder="0" min="0"/></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Category</label>
+          <select class="fsel" id="f-cat">
+            <option value="">Select...</option>
+            <option>Food &amp; Beverage</option><option>Electronics</option>
+            <option>Clothing</option><option>Health &amp; Beauty</option>
+            <option>Home &amp; Garden</option><option>Sports</option>
+            <option>Books</option><option>Other</option>
+          </select></div>
+        <div class="field"><label>SKU</label>
+          <input type="text" id="f-sku" placeholder="Optional"/></div>
+      </div>
+      <div class="field"><label>Description</label>
+        <textarea id="f-desc" placeholder="Optional notes..."></textarea></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="clearForm()">Clear</button>
+      <button class="btn primary" onclick="saveProduct()">
+        <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Save Product
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ INVENTORY TAB ═══════════════════════ -->
+  <div class="panel" id="tab-products">
+    <div class="stats">
+      <div class="stat"><div class="stat-n" id="s-count">0</div><div class="stat-l">Products</div></div>
+      <div class="stat"><div class="stat-n" id="s-stock">0</div><div class="stat-l">Total Stock</div></div>
+      <div class="stat"><div class="stat-n" id="s-val">₹0</div><div class="stat-l">Value</div></div>
+    </div>
+    <div class="srch">
+      <svg class="srch-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="search-input" placeholder="Search by name, barcode or SKU..." oninput="renderProducts()"/>
+    </div>
+    <div class="plist" id="product-list">
+      <div class="empty">No products yet.<br>Scan a barcode and save your first product.</div>
+    </div>
+  </div>
+
+</div><!-- .app -->
+
+<div class="toast" id="toast"></div>
+
+<!-- ═══════ Quagga — barcode detection ═══════ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<script>
+'use strict';
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let products   = [];
+let scanning   = false;
+let currentBC  = '';
+let lastCode   = '';
+let lastCodeTs = 0;
+let cameras    = [];   // [{deviceId, label}]
+
+// ─── Persistence ─────────────────────────────────────────────────────────────
+function loadProducts(){
+  try{ products = JSON.parse(localStorage.getItem('sv-products')||'[]'); }
+  catch(e){ products=[]; }
+  renderProducts(); updateStats();
+}
+function saveProducts(){
+  localStorage.setItem('sv-products', JSON.stringify(products));
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+let _tt;
+function toast(msg, dur=2400){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.classList.add('show');
+  clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('show'),dur);
+}
+
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+function switchTab(name){
+  ['scan','add','products'].forEach((n,i)=>{
+    document.querySelectorAll('.tab')[i].classList.toggle('active',n===name);
+    document.getElementById('tab-'+n).classList.toggle('active',n===name);
+  });
+  if(name==='products'){ renderProducts(); updateStats(); }
+}
+
+// ─── Camera helpers ───────────────────────────────────────────────────────────
+function setStatus(txt, state='idle'){
+  document.getElementById('cam-status-txt').textContent = txt;
+  const dot = document.getElementById('cam-dot');
+  dot.className = 'dot';
+  if(state==='live'){ dot.classList.add('green','pulse'); }
+  else if(state==='error'){ dot.classList.add('red'); }
+}
+
+async function enumerateCameras(){
+  try{
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    cameras = devices
+      .filter(d=>d.kind==='videoinput')
+      .map((d,i)=>({ deviceId:d.deviceId, label:d.label||'Camera '+(i+1) }));
+    const sel = document.getElementById('cam-select');
+    sel.innerHTML = cameras.map((c,i)=>
+      `<option value="${c.deviceId}">${c.label}</option>`
+    ).join('');
+    document.getElementById('cam-select-wrap').style.display =
+      cameras.length > 1 ? 'block' : 'none';
+  }catch(e){}
+}
+
+function getSelectedDeviceId(){
+  const sel = document.getElementById('cam-select');
+  return sel.value || undefined;  // undefined = let Quagga pick default
+}
+
+// ─── Start camera ─────────────────────────────────────────────────────────────
+async function startCamera(){
+  if(scanning) stopCamera();
+
+  setStatus('Requesting camera permission…');
+  document.getElementById('btn-start').disabled = true;
+
+  // 1. Ask for permission first (getUserMedia) so enumerateDevices gets labels
+  try{
+    const tmpStream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ideal:'environment'} }
+    });
+    tmpStream.getTracks().forEach(t=>t.stop()); // release immediately
+  }catch(e){
+    setStatus('Permission denied: '+e.message, 'error');
+    toast('❌ Camera permission denied');
+    document.getElementById('btn-start').disabled = false;
+    return;
+  }
+
+  await enumerateCameras();
+
+  // 2. Determine constraints
+  const deviceId = getSelectedDeviceId();
+  const videoConstraints = deviceId
+    ? { deviceId:{ exact:deviceId } }
+    : { facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:720} };
+
+  // 3. Init Quagga with the scanner-container div as viewport
+  Quagga.init({
+    inputStream:{
+      type: 'LiveStream',
+      target: document.getElementById('scanner-container'),
+      constraints: videoConstraints,
+      area:{ top:'20%', right:'10%', left:'10%', bottom:'20%' }
+    },
+    locator:{ patchSize:'medium', halfSample:true },
+    numOfWorkers: navigator.hardwareConcurrency > 2 ? 2 : 1,
+    frequency: 10,
+    decoder:{
+      readers:[
+        'ean_reader','ean_8_reader',
+        'upc_reader','upc_e_reader',
+        'code_128_reader','code_39_reader',
+        'itf_reader','codabar_reader'
+      ],
+      debug:{ drawBoundingBox:false, showFrequency:false, drawScanline:false, showPattern:false }
+    },
+    locate: true
+  }, function(err){
+    if(err){
+      setStatus('Init error: '+err, 'error');
+      toast('Scanner error: '+err);
+      document.getElementById('btn-start').disabled = false;
+      return;
+    }
+    Quagga.start();
+    scanning = true;
+
+    // hide idle, show overlay
+    document.getElementById('scan-idle').style.display = 'none';
+    document.getElementById('scan-overlay').style.display = 'flex';
+    setStatus('Camera live — aim at barcode', 'live');
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('btn-stop').disabled = false;
+    toast('📷 Camera started');
+  });
+
+  // 4. Detection callback
+  Quagga.onDetected(function(result){
+    const code  = result && result.codeResult && result.codeResult.code;
+    if(!code) return;
+    const now = Date.now();
+    // debounce: ignore same code within 3 s
+    if(code === lastCode && now - lastCodeTs < 3000) return;
+    lastCode   = code;
+    lastCodeTs = now;
+
+    // flash the scan line green briefly
+    const sl = document.querySelector('.scan-line');
+    if(sl){ sl.style.background='#22c55e'; setTimeout(()=>{ sl.style.background='#4da6ff'; },400); }
+
+    showScanResult(code);
+    toast('✅ Scanned: '+code);
+  });
+
+  // Optionally draw bounding boxes via processedImage — skip for clean UI
+}
+
+// ─── Stop camera ──────────────────────────────────────────────────────────────
+function stopCamera(){
+  if(scanning){ try{ Quagga.stop(); }catch(e){} scanning=false; }
+  document.getElementById('scan-idle').style.display  = 'flex';
+  document.getElementById('scan-overlay').style.display = 'none';
+  setStatus('Camera stopped');
+  document.getElementById('btn-stop').disabled = true;
+  document.getElementById('btn-start').disabled = false;
+}
+
+// ─── Switch camera (dropdown) ─────────────────────────────────────────────────
+function switchCamera(){
+  if(scanning){ stopCamera(); setTimeout(startCamera, 300); }
+}
+
+// ─── Show scan result ─────────────────────────────────────────────────────────
+function showScanResult(code){
+  currentBC = code;
+  document.getElementById('scanned-code').textContent = code;
+  document.getElementById('scan-result').style.display = 'block';
+
+  const existing = products.find(p=>p.barcode===code);
+  const fp    = document.getElementById('found-product');
+  const badge = document.getElementById('scan-badge');
+
+  if(existing){
+    badge.textContent='Found'; badge.className='badge bs';
+    fp.innerHTML=`
+      <div class="pcard" style="margin-bottom:.5rem">
+        <div class="pc-top">
+          <div><div class="pc-name">${h(existing.name)}</div>
+               <div class="pc-bc">${h(existing.barcode)}</div></div>
+          <span class="badge bi">Stock: ${existing.stock||0}</span>
+        </div>
+        <div class="pc-row">
+          <span class="pc-price">₹${(+existing.price||0).toFixed(2)}</span>
+          ${existing.category?`<span class="badge bi">${h(existing.category)}</span>`:''}
+        </div>
+      </div>`;
+    prefillForm(existing);
+  } else {
+    badge.textContent='New'; badge.className='badge bw';
+    fp.innerHTML='';
+    document.getElementById('f-barcode').value = code;
+    document.getElementById('form-bc-val').textContent = code;
+  }
+}
+
+function useBarcodeInForm(){
+  if(currentBC){ switchTab('add'); }
+}
+
+// ─── Manual entry ─────────────────────────────────────────────────────────────
+function manualScan(){
+  const val = document.getElementById('manual-input').value.trim();
+  if(!val){ toast('⚠ Enter a barcode value'); return; }
+  showScanResult(val);
+  document.getElementById('manual-input').value='';
+  toast('Barcode loaded: '+val);
+}
+
+// ─── Form helpers ─────────────────────────────────────────────────────────────
+function prefillForm(p){
+  document.getElementById('f-barcode').value = p.barcode||'';
+  document.getElementById('f-name').value    = p.name||'';
+  document.getElementById('f-price').value   = p.price||'';
+  document.getElementById('f-stock').value   = p.stock||'';
+  document.getElementById('f-cat').value     = p.category||'';
+  document.getElementById('f-sku').value     = p.sku||'';
+  document.getElementById('f-desc').value    = p.description||'';
+  document.getElementById('form-bc-val').textContent = p.barcode||'No barcode';
+}
+
+function clearForm(){
+  ['f-barcode','f-name','f-price','f-stock','f-sku','f-desc']
+    .forEach(id=>document.getElementById(id).value='');
+  document.getElementById('f-cat').value='';
+  document.getElementById('form-bc-val').textContent='No barcode scanned';
+}
+
+function saveProduct(){
+  const barcode = document.getElementById('f-barcode').value.trim();
+  const name    = document.getElementById('f-name').value.trim();
+  if(!barcode){ toast('⚠ Barcode is required'); return; }
+  if(!name)   { toast('⚠ Product name is required'); return; }
+
+  const now = new Date().toISOString();
+  const p = {
+    barcode, name,
+    price: document.getElementById('f-price').value||'0',
+    stock: document.getElementById('f-stock').value||'0',
+    category: document.getElementById('f-cat').value,
+    sku:  document.getElementById('f-sku').value.trim(),
+    description: document.getElementById('f-desc').value.trim(),
+    updatedAt: now
+  };
+
+  const idx = products.findIndex(x=>x.barcode===barcode);
+  if(idx>-1){ p.createdAt=products[idx].createdAt||now; products[idx]=p; toast('✓ Product updated!'); }
+  else       { p.createdAt=now; products.unshift(p); toast('✓ Product saved!'); }
+
+  saveProducts(); updateStats(); clearForm();
+  setTimeout(()=>switchTab('products'), 400);
+}
+
+// ─── Inventory ────────────────────────────────────────────────────────────────
+function renderProducts(){
+  const q = (document.getElementById('search-input').value||'').toLowerCase();
+  const list = document.getElementById('product-list');
+  const show = products.filter(p=>
+    !q || p.name.toLowerCase().includes(q) ||
+    p.barcode.includes(q) || (p.sku||'').toLowerCase().includes(q)
+  );
+  if(!show.length){
+    list.innerHTML=`<div class="empty">${q?'No products match your search.':'No products yet.<br>Scan a barcode and save your first product.'}</div>`;
+    return;
+  }
+  list.innerHTML = show.map(p=>`
+    <div class="pcard">
+      <div class="pc-top">
+        <div style="min-width:0">
+          <div class="pc-name">${h(p.name)}</div>
+          <div class="pc-bc">${h(p.barcode)}${p.sku?' · '+h(p.sku):''}</div>
+        </div>
+        <div class="pc-actions">
+          <button class="icobtn edit" onclick="editProduct('${ea(p.barcode)}')">Edit</button>
+          <button class="icobtn del"  onclick="deleteProduct('${ea(p.barcode)}')">Del</button>
+        </div>
+      </div>
+      <div class="pc-row">
+        <span class="pc-price">₹${(+(p.price)||0).toFixed(2)}</span>
+        <span style="font-size:12px;color:var(--tx2)">Stock: ${p.stock||0}</span>
+        ${p.category?`<span class="badge bi">${h(p.category)}</span>`:''}
+      </div>
+      ${p.description?`<div style="font-size:12px;color:var(--tx2);margin-top:6px;line-height:1.6">${h(p.description)}</div>`:''}
+    </div>`).join('');
+}
+
+function editProduct(barcode){
+  const p = products.find(x=>x.barcode===barcode);
+  if(!p) return;
+  prefillForm(p); switchTab('add'); toast('Editing: '+p.name);
+}
+
+function deleteProduct(barcode){
+  if(!confirm('Delete this product?')) return;
+  products = products.filter(p=>p.barcode!==barcode);
+  saveProducts(); renderProducts(); updateStats();
+  toast('Product deleted');
+}
+
+function updateStats(){
+  document.getElementById('s-count').textContent = products.length;
+  document.getElementById('s-stock').textContent = products.reduce((a,p)=>a+parseInt(p.stock||0),0);
+  const val = products.reduce((a,p)=>a+(parseFloat(p.price||0)*parseInt(p.stock||0)),0);
+  document.getElementById('s-val').textContent = '₹'+Math.round(val).toLocaleString('en-IN');
+}
+
+// ─── Safety helpers ───────────────────────────────────────────────────────────
+function h(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function ea(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+loadProducts();
+
+// Check HTTPS / localhost requirement
+if(location.protocol!=='https:' && location.hostname!=='localhost' && location.hostname!=='127.0.0.1'){
+  setStatus('⚠ HTTPS required for camera', 'error');
+  document.getElementById('btn-start').disabled = true;
+  document.getElementById('btn-start').title = 'Camera requires HTTPS or localhost';
+}
+</script>
+</body>
+</html>
